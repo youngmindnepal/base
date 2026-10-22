@@ -1,0 +1,169 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+
+
+// ─────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────
+enum Effect {
+  ALLOW
+  DENY
+}
+
+enum ScopeType {
+  GLOBAL
+  BRANCH
+  DEPARTMENT
+}
+
+// ─────────────────────────────────────────────────────────────
+// User
+// ─────────────────────────────────────────────────────────────
+model User {
+  id       Int     @id @default(autoincrement())
+  email    String  @unique
+  password String?
+  status   String  @default("ACTIVE")
+
+  firstName String?
+  lastName  String?
+  phone     String?
+  address   String?
+
+  mustChangePassword Boolean   @default(false)
+  lastLogin          DateTime?
+
+  // bump whenever overrides change so cached UI hints can refresh
+  permissionsVersion Int @default(0)
+
+  roleAssignments UserRole[]
+  overrides       UserPermissionOverride[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────────────────────
+// Role
+// ─────────────────────────────────────────────────────────────
+model Role {
+  id          Int     @id @default(autoincrement())
+  name        String  @unique
+  description String?
+
+  assignments UserRole[]
+  permissions RolePermission[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────────────────────
+// Permission
+// ─────────────────────────────────────────────────────────────
+model Permission {
+  id          Int     @id @default(autoincrement())
+  name        String  @unique
+  description String?
+
+  // Optional grouping fields (kept for backward compat with the seed)
+  module String?
+  action String?
+
+  // Relation to category
+  categoryId Int?
+  category   PermissionCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  roles   RolePermission[]
+  users   UserPermissionOverride[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([categoryId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Role ↔ Permission (base grants)
+// ─────────────────────────────────────────────────────────────
+model RolePermission {
+  roleId       Int
+  permissionId Int
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// User ↔ Role (with scope)
+// ─────────────────────────────────────────────────────────────
+model UserRole {
+  id        Int    @id @default(autoincrement())
+  userId    Int
+  roleId    Int
+  scopeType String @default("GLOBAL")
+  scopeId   Int?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, roleId, scopeType, scopeId])
+  @@index([roleId, scopeType, scopeId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// User ↔ Permission override (fine-grained ALLOW / DENY + scope)
+// ─────────────────────────────────────────────────────────────
+model UserPermissionOverride {
+  id           Int       @id @default(autoincrement())
+  userId       Int
+  permissionId Int
+  effect       Effect    @default(ALLOW)
+  scopeType    ScopeType @default(GLOBAL)
+  scopeId      Int?      // branchId / departmentId; null when GLOBAL
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // One override per (user, permission, scope). To flip ALLOW↔DENY, update the row.
+  @@unique([userId, permissionId, scopeType, scopeId])
+  @@index([userId, permissionId])
+  @@index([permissionId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Permission Category
+// ─────────────────────────────────────────────────────────────
+model PermissionCategory {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  code        String   @unique
+  description String?
+  icon        String?
+  color       String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+
+  permissions Permission[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("permission_categories")
+}
+
